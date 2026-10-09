@@ -1,43 +1,62 @@
 import uuid
-from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from fastapi import APIRouter, HTTPException
-
+from db.session import get_db
+from models.user import User
 from schemas.user import UserCreate, UserResponse
 
 router = APIRouter(prefix="/users", tags=["Users"])
-users_db ={}
 
-@router.post("/", status_code=201)
-def create_user(user: UserCreate) -> UserResponse:
-    user_id = uuid.uuid4()
-    created_at = datetime.now(timezone.utc)
-    new_user = user.model_dump()
-    new_user['user_id'] = user_id
-    new_user['created_at'] = created_at
-    users_db[user_id] = new_user
-    return UserResponse(
-        user_id=user_id,
-        name=user.name,
-        username=user.username,
-        age=user.age,
-        email=user.email,
-        created_at=created_at
+
+@router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+def create_user(user_in: UserCreate, db: Session = Depends(get_db)) -> User:
+    # Check if a user with the same username or email already exists
+    existing_user = db.scalar(
+        select(User).where(
+            (User.username == user_in.username) | (User.email == user_in.email)
+        )
     )
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A user with that username or email already exists.",
+        )
+
+    # Instantiate the SQLAlchemy model
+    new_user = User(
+        name=user_in.name,
+        username=user_in.username,
+        password=user_in.password,
+        age=user_in.age,
+        email=user_in.email,
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
 
 @router.get("/", response_model=list[UserResponse])
-def get_users() -> list[UserResponse]:
-    return list(users_db.values())
+def get_users(db: Session = Depends(get_db)) -> list[User]:
+    users = db.scalars(select(User)).all()
+    return list(users)
+
 
 @router.get("/{user_id}", response_model=UserResponse)
-def get_user(user_id: uuid.UUID) -> UserResponse:
-    if user_id not in users_db:
-        raise HTTPException(status_code=404, detail="User not found")
-    return users_db[user_id]
+def get_user(user_id: uuid.UUID, db: Session = Depends(get_db)) -> User:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
 
-@router.delete("/{user_id}", status_code=204)
-def delete_user(user_id: uuid.UUID):
-    if user_id not in users_db:
-        raise HTTPException(status_code=404, detail="User not found")
-    del users_db[user_id]
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(user_id: uuid.UUID, db: Session = Depends(get_db)):
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    db.delete(user)
+    db.commit()
     return
