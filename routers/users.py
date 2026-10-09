@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from core.security import hash_password
 from db.session import get_db
 from models.user import User
 from schemas.user import UserCreate, UserResponse
@@ -24,11 +25,11 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)) -> User:
             detail="A user with that username or email already exists.",
         )
 
-    # Instantiate the SQLAlchemy model
+    # Instantiate the SQLAlchemy model with securely hashed password
     new_user = User(
         name=user_in.name,
         username=user_in.username,
-        password=user_in.password,
+        hashed_password=hash_password(user_in.password),
         age=user_in.age,
         email=user_in.email,
     )
