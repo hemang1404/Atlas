@@ -13,7 +13,7 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    age: Mapped[int] = mapped_column(Integer, nullable=False)
+    age: Mapped[int | None] = mapped_column(Integer, nullable=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
