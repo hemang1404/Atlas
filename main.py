@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from core.config import settings
 from db.session import engine
 from models.base import Base
 from routers import users
@@ -12,7 +13,11 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Atlas API", lifespan=lifespan)
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.VERSION,
+    lifespan=lifespan,
+)
 app.include_router(users.router)
 
 
