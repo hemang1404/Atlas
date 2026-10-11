@@ -17,3 +17,9 @@ wheels/
 docs/
 .agents/
 AGENTS.md
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+
