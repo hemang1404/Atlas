@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from core.config import settings
-from routers import users
+from routers import auth, users
 
 
 @asynccontextmanager
@@ -15,6 +15,7 @@ app = FastAPI(
     version=settings.VERSION,
     lifespan=lifespan,
 )
+app.include_router(auth.router)
 app.include_router(users.router)
 
 

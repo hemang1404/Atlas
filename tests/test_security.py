@@ -31,3 +31,17 @@ def test_hash_password_generates_unique_salts():
     assert hash1 != hash2
     assert verify_password(password, hash1) is True
     assert verify_password(password, hash2) is True
+
+
+def test_create_and_decode_access_token():
+    from core.security import create_access_token, decode_access_token
+
+    subject = "12345678-1234-5678-1234-567812345678"
+    token = create_access_token(subject=subject)
+    assert isinstance(token, str)
+
+    payload = decode_access_token(token)
+    assert payload["sub"] == subject
+    assert "exp" in payload
+    assert "iat" in payload
+

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from core.deps import get_current_user
 from core.security import hash_password
 from db.session import get_db
 from models.user import User
@@ -43,6 +44,15 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)) -> User:
 def get_users(db: Session = Depends(get_db)) -> list[User]:
     users = db.scalars(select(User)).all()
     return list(users)
+
+
+@router.get("/me", response_model=UserResponse)
+def get_my_profile(current_user: User = Depends(get_current_user)) -> User:
+    """
+    Returns the authenticated user's profile based on the supplied JWT Bearer token.
+    Must be defined before /{user_id} so 'me' is not parsed as a UUID parameter.
+    """
+    return current_user
 
 
 @router.get("/{user_id}", response_model=UserResponse)
