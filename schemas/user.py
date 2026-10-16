@@ -52,3 +52,24 @@ class UserResponse(BaseModel):
     is_active: bool
     is_superuser: bool
     created_at: datetime
+
+
+class UserUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    username: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=50,
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        description="Optional unique URL-safe handle",
+    )
+    email: EmailStr | None = Field(default=None, description="Optional valid RFC 5322 email address")
+    age: int | None = Field(default=None, ge=0, le=120, description="Optional age between 0 and 120")
+    password: str | None = Field(
+        default=None,
+        min_length=8,
+        max_length=128,
+        description="Optional new plaintext password (NIST standard bounds)",
+    )
+    is_active: bool | None = Field(default=None, description="Account active status (superuser only)")
+    is_superuser: bool | None = Field(default=None, description="Superuser privilege status (superuser only)")

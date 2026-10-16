@@ -259,3 +259,150 @@ def test_inactive_user_rejected_by_active_dependency(
     assert response.json()["detail"] == "Inactive user"
 
 
+def test_update_user_self_success(
+    client: TestClient,
+    normal_user: tuple,
+):
+    user, headers = normal_user
+    res_patch = client.patch(
+        f"/users/{user.id}",
+        json={"name": "Brand New Name", "age": 42},
+        headers=headers,
+    )
+    assert res_patch.status_code == 200
+    data = res_patch.json()
+    assert data["name"] == "Brand New Name"
+    assert data["age"] == 42
+    assert data["username"] == user.username
+    assert data["email"] == user.email
+
+
+def test_update_user_password_success(
+    client: TestClient,
+    normal_user: tuple,
+):
+    user, headers = normal_user
+    new_password = "NewlyUpdatedPassword123!"
+
+    # 1. Update password
+    res_patch = client.patch(
+        f"/users/{user.id}",
+        json={"password": new_password},
+        headers=headers,
+    )
+    assert res_patch.status_code == 200
+
+    # 2. Login with new password succeeds
+    login_new = client.post(
+        "/auth/login",
+        data={"username": user.username, "password": new_password},
+    )
+    assert login_new.status_code == 200
+
+    # 3. Login with old password fails
+    login_old = client.post(
+        "/auth/login",
+        data={"username": user.username, "password": "RegularPassword123!"},
+    )
+    assert login_old.status_code == 401
+
+
+def test_update_user_unauthorized_cross_account_fails(
+    client: TestClient,
+    normal_user: tuple,
+):
+    user1, headers1 = normal_user
+
+    # Register user2
+    res2 = client.post("/users/", json={
+        "name": "User Two", "username": "user2_update", "email": "u2_up@example.com", "password": "Password123!"
+    })
+    user2_id = res2.json()["id"]
+
+    # User 1 attempts to update User 2 -> 403 Forbidden
+    response = client.patch(
+        f"/users/{user2_id}",
+        json={"name": "Hacked Name"},
+        headers=headers1,
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Not authorized to update this user"
+
+
+def test_update_user_by_admin_success(
+    client: TestClient,
+    superuser_headers: dict[str, str],
+    normal_user: tuple,
+):
+    user, _ = normal_user
+
+    # Superuser updates normal user's profile
+    res_admin = client.patch(
+        f"/users/{user.id}",
+        json={"name": "Admin Adjusted Name"},
+        headers=superuser_headers,
+    )
+    assert res_admin.status_code == 200
+    assert res_admin.json()["name"] == "Admin Adjusted Name"
+
+
+def test_update_user_non_admin_cannot_elevate_privileges(
+    client: TestClient,
+    normal_user: tuple,
+):
+    user, headers = normal_user
+
+    # Regular user attempts to elevate self to superuser
+    response = client.patch(
+        f"/users/{user.id}",
+        json={"is_superuser": True},
+        headers=headers,
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Cannot modify administrative privileges"
+
+
+def test_update_user_admin_can_toggle_is_active(
+    client: TestClient,
+    superuser_headers: dict[str, str],
+    normal_user: tuple,
+):
+    user, user_headers = normal_user
+
+    # Superuser suspends user
+    res_deactivate = client.patch(
+        f"/users/{user.id}",
+        json={"is_active": False},
+        headers=superuser_headers,
+    )
+    assert res_deactivate.status_code == 200
+    assert res_deactivate.json()["is_active"] is False
+
+    # Suspended user now blocked from calling /users/me
+    res_blocked = client.get("/users/me", headers=user_headers)
+    assert res_blocked.status_code == 400
+    assert res_blocked.json()["detail"] == "Inactive user"
+
+
+def test_update_user_duplicate_username_fails(
+    client: TestClient,
+    normal_user: tuple,
+):
+    user1, headers1 = normal_user
+
+    # Register user2 with username 'existing_user'
+    client.post("/users/", json={
+        "name": "Existing", "username": "existing_user", "email": "existing@example.com", "password": "Password123!"
+    })
+
+    # User 1 tries to change their username to 'existing_user'
+    res_conflict = client.patch(
+        f"/users/{user1.id}",
+        json={"username": "existing_user"},
+        headers=headers1,
+    )
+    assert res_conflict.status_code == 409
+    assert "already exists" in res_conflict.json()["detail"]
+
+
+
