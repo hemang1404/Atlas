@@ -50,3 +50,50 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def superuser_headers(db_session: Session) -> dict[str, str]:
+    """
+    Creates an active superuser in the test database and returns valid Bearer auth headers.
+    """
+    from core.security import create_access_token, hash_password
+    from models.user import User
+
+    admin = User(
+        name="Admin User",
+        username="admin_user",
+        email="admin@example.com",
+        hashed_password=hash_password("AdminPassword123!"),
+        is_active=True,
+        is_superuser=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+    db_session.refresh(admin)
+    token = create_access_token(subject=str(admin.id))
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def normal_user(db_session: Session) -> tuple["User", dict[str, str]]:
+    """
+    Creates an active regular user in the test database and returns (user, auth_headers).
+    """
+    from core.security import create_access_token, hash_password
+    from models.user import User
+
+    user = User(
+        name="Regular User",
+        username="regular_user",
+        email="regular@example.com",
+        hashed_password=hash_password("RegularPassword123!"),
+        is_active=True,
+        is_superuser=False,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    token = create_access_token(subject=str(user.id))
+    return user, {"Authorization": f"Bearer {token}"}
+

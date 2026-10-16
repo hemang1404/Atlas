@@ -41,3 +41,33 @@ def get_current_user(
     if user is None:
         raise credentials_exception
     return user
+
+
+def get_current_active_user(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """
+    Validates that the authenticated user's account is active.
+    """
+    if not current_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inactive user",
+        )
+    return current_user
+
+
+def get_current_active_superuser(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+) -> User:
+    """
+    Validates that the authenticated user is an active superuser/admin.
+    Raises HTTP 403 Forbidden if the user lacks administrative privileges.
+    """
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The user does not have enough privileges",
+        )
+    return current_user
+

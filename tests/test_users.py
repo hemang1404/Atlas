@@ -18,12 +18,15 @@ def test_create_user_success(client: TestClient):
     assert data["username"] == "alice_smith"
     assert data["email"] == "alice@example.com"
     assert data["age"] == 28
+    assert data["is_active"] is True
+    assert data["is_superuser"] is False
     assert "id" in data
     assert "created_at" in data
 
     # Crucial security invariants: passwords must NEVER leak in API responses
     assert "password" not in data
     assert "hashed_password" not in data
+
 
 
 def test_create_user_duplicate_username_fails(client: TestClient):
@@ -132,53 +135,127 @@ def test_username_invalid_chars_fails_regex(client: TestClient):
         assert response.status_code == 422, f"Expected 422 for username '{bad_username}'"
 
 
-def test_get_users_list(client: TestClient):
-    # Register two users
-    client.post("/users/", json={
-        "name": "User One", "username": "user1", "email": "u1@example.com", "password": "Password123!"
-    })
-    client.post("/users/", json={
+def test_get_users_list_admin_only(
+    client: TestClient,
+    superuser_headers: dict[str, str],
+    normal_user: tuple,
+):
+    user, normal_headers = normal_user
+
+    # 1. Unauthenticated request fails with 401
+    res_unauth = client.get("/users/")
+    assert res_unauth.status_code == 401
+
+    # 2. Regular user fails with 403 Forbidden (RBAC)
+    res_forbidden = client.get("/users/", headers=normal_headers)
+    assert res_forbidden.status_code == 403
+    assert res_forbidden.json()["detail"] == "The user does not have enough privileges"
+
+    # 3. Superuser succeeds with 200 OK
+    res_admin = client.get("/users/", headers=superuser_headers)
+    assert res_admin.status_code == 200
+    users = res_admin.json()
+    assert len(users) >= 2
+    usernames = [u["username"] for u in users]
+    assert "admin_user" in usernames
+    assert "regular_user" in usernames
+
+
+def test_get_user_by_id_ownership_and_admin(
+    client: TestClient,
+    superuser_headers: dict[str, str],
+    normal_user: tuple,
+):
+    user1, headers1 = normal_user
+
+    # Register user2
+    res2 = client.post("/users/", json={
         "name": "User Two", "username": "user2", "email": "u2@example.com", "password": "Password123!"
     })
+    user2_id = res2.json()["id"]
 
-    response = client.get("/users/")
-    assert response.status_code == 200
-    users = response.json()
-    assert len(users) == 2
-    usernames = [u["username"] for u in users]
-    assert "user1" in usernames
-    assert "user2" in usernames
+    # 1. Normal user accessing their OWN profile succeeds (200)
+    res_self = client.get(f"/users/{user1.id}", headers=headers1)
+    assert res_self.status_code == 200
+    assert res_self.json()["id"] == str(user1.id)
 
+    # 2. Normal user accessing user2's profile FAILS with 403 Forbidden (BOLA/IDOR protection)
+    res_other = client.get(f"/users/{user2_id}", headers=headers1)
+    assert res_other.status_code == 403
+    assert res_other.json()["detail"] == "Not authorized to access this user profile"
 
-def test_get_user_by_id(client: TestClient):
-    res_create = client.post("/users/", json={
-        "name": "Target User", "username": "target_user", "email": "target@example.com", "password": "Password123!"
-    })
-    user_id = res_create.json()["id"]
-
-    res_get = client.get(f"/users/{user_id}")
-    assert res_get.status_code == 200
-    assert res_get.json()["id"] == user_id
-    assert res_get.json()["username"] == "target_user"
+    # 3. Superuser accessing user2's profile SUCCEEDS (200)
+    res_admin = client.get(f"/users/{user2_id}", headers=superuser_headers)
+    assert res_admin.status_code == 200
+    assert res_admin.json()["id"] == user2_id
 
 
-def test_get_user_not_found(client: TestClient):
+def test_get_user_not_found_as_superuser(
+    client: TestClient,
+    superuser_headers: dict[str, str],
+):
     random_uuid = str(uuid.uuid4())
-    response = client.get(f"/users/{random_uuid}")
+    response = client.get(f"/users/{random_uuid}", headers=superuser_headers)
     assert response.status_code == 404
     assert response.json()["detail"] == "User not found"
 
 
-def test_delete_user(client: TestClient):
-    res_create = client.post("/users/", json={
-        "name": "Delete Me", "username": "delete_me", "email": "delete@example.com", "password": "Password123!"
-    })
-    user_id = res_create.json()["id"]
+def test_delete_user_ownership_and_admin(
+    client: TestClient,
+    superuser_headers: dict[str, str],
+    normal_user: tuple,
+):
+    user1, headers1 = normal_user
 
-    # Delete returns 204 No Content
-    res_del = client.delete(f"/users/{user_id}")
-    assert res_del.status_code == 204
+    # Register user2
+    res2 = client.post("/users/", json={
+        "name": "Target User", "username": "target_user", "email": "target@example.com", "password": "Password123!"
+    })
+    user2_id = res2.json()["id"]
+
+    # 1. Normal user attempting to delete another user FAILS with 403 Forbidden
+    res_forbidden = client.delete(f"/users/{user2_id}", headers=headers1)
+    assert res_forbidden.status_code == 403
+    assert res_forbidden.json()["detail"] == "Not authorized to delete this user"
+
+    # 2. Normal user deleting their OWN account succeeds with 204 No Content
+    res_self_delete = client.delete(f"/users/{user1.id}", headers=headers1)
+    assert res_self_delete.status_code == 204
+
+    # 3. Superuser deleting user2 succeeds with 204 No Content
+    res_admin_delete = client.delete(f"/users/{user2_id}", headers=superuser_headers)
+    assert res_admin_delete.status_code == 204
 
     # Subsequent GET returns 404
-    res_get = client.get(f"/users/{user_id}")
-    assert res_get.status_code == 404
+    res_check = client.get(f"/users/{user2_id}", headers=superuser_headers)
+    assert res_check.status_code == 404
+
+
+def test_inactive_user_rejected_by_active_dependency(
+    client: TestClient,
+    db_session,
+):
+    from core.security import create_access_token, hash_password
+    from models.user import User
+
+    inactive_user = User(
+        name="Deactivated User",
+        username="inactive_user",
+        email="inactive@example.com",
+        hashed_password=hash_password("Password123!"),
+        is_active=False,
+        is_superuser=False,
+    )
+    db_session.add(inactive_user)
+    db_session.commit()
+    db_session.refresh(inactive_user)
+
+    token = create_access_token(subject=str(inactive_user.id))
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Calling /users/me fails because account is deactivated
+    response = client.get("/users/me", headers=headers)
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Inactive user"
+
+
